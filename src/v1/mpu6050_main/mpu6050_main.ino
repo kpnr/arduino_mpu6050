@@ -20,22 +20,34 @@
 char HEX_DIGITS[] = "0123456789ABCDEF";
 void (*g_bg_task)(int) = NULL;
 
+void println(const char *s){
+  Serial.println(s);
+}
+
+void print(const char *s){
+  Serial.print(s);
+}
+
+void MPU_read_request(int reg, int count){
+  Wire.beginTransmission(MPU_addr); Wire.write(reg); Wire.endTransmission(false); Wire.requestFrom(MPU_addr, count, true);
+}
+
+void MPU_write(int reg, int value){
+  Wire.beginTransmission(MPU_addr); Wire.write(reg); Wire.write(value); Wire.endTransmission(true); 
+}
+
 void task_arun(int keep_running){
   static uint8_t sample_buf[SAMPLE_SIZE*SAMPLE_BUF];
   static byte sample_cnt = 0;
   static byte t = 0;
   if(!keep_running){
-      //FIFO_EN = temp_fifo_en, xg_fifo_en, yg_fifo_en, zg_fifo_en, accel_fifo_en, slv2_fifo_en, slv1_fifo_en, slv0_fifo_en
-      //Wire.beginTransmission(MPU_addr); Wire.write(MPU_reg_fifo_en); Wire.write(0x00 /* disable all */); Wire.endTransmission(true);
-      //Wire.beginTransmission(MPU_addr); Wire.write(MPU_reg_user_ctrl); Wire.write(0x04 /*FIFO stop & reset*/); Wire.endTransmission(true);
-      Serial.println("arun done");
+      println("arun done");
       sample_cnt = 0;
       return;
   }
-
-  Wire.beginTransmission(MPU_addr); Wire.write(MPU_reg_int_status); Wire.endTransmission(false); Wire.requestFrom(MPU_addr, 1, true);
+  MPU_read_request(MPU_reg_int_status, 1);
   if(Wire.read() & 1 /*data_rdy_bit*/){
-    Wire.beginTransmission(MPU_addr); Wire.write(MPU_reg_accel_out); Wire.endTransmission(false); Wire.requestFrom(MPU_addr, SAMPLE_SIZE, true);
+    MPU_read_request(MPU_reg_accel_out, SAMPLE_SIZE);
     for(int i=0; i < SAMPLE_SIZE; i++){
       sample_buf[sample_cnt*SAMPLE_SIZE + i] = Wire.read();
     }
@@ -52,85 +64,58 @@ void task_arun(int keep_running){
       sample_buf[a_count*2] = a_avg >> 8;
       sample_buf[a_count*2 + 1] = a_avg;
     }
-    Serial.print("0x");
+    print("0x");
     for(int i=0; i < SAMPLE_SIZE; i++){
       byte r = sample_buf[i]; 
       Serial.write(HEX_DIGITS[r >> 4]); 
       Serial.write(HEX_DIGITS[r & 0xf]);
     }
-    Serial.println("");    
+    println("");    
     sample_cnt = 0;
   }
-  /*
-  Wire.beginTransmission(MPU_addr); Wire.write(MPU_reg_fifo_count_h); Wire.endTransmission(false); Wire.requestFrom(MPU_addr, 2, true);
-  uint16_t cnt = Wire.read(); cnt = cnt << 8 + Wire.read();
-  if(cnt){
-    int bytes_to_read = FIFO_ITEM_SIZE - buf_cnt;
-    if(cnt < bytes_to_read) bytes_to_read = cnt;
-    Wire.beginTransmission(MPU_addr); Wire.write(MPU_reg_fifo_r_w); Wire.endTransmission(false); Wire.requestFrom(MPU_addr, 1, true);
-    //while(bytes_to_read--) 
-    buf[buf_cnt++] = Wire.read();
-  }else{
-    Wire.beginTransmission(MPU_addr); Wire.write(MPU_reg_fifo_r_w); Wire.write(t++); Wire.endTransmission(true);
-  }
-  
-  if(FIFO_ITEM_SIZE == buf_cnt){
-    Serial.print("0x");
-    for(int i=0; i < FIFO_ITEM_SIZE; i++){
-      byte r = buf[i]; 
-      Serial.write(HEX_DIGITS[r >> 4]); 
-      Serial.write(HEX_DIGITS[r & 0xf]);
-    }
-    buf_cnt = 0;
-    Serial.println("");
-  }
-  */
 }
 void execute_command(const char *command){
   Serial.println("");
   if(!strcmp(command, "")){
     
   }else if(!strcmp(command, "help") || !strcmp(command,"?")){
-    Serial.println("Available commands:");
-    Serial.println("? help: show this message");
-    Serial.println("ainit: initialize accelerometer");
-    Serial.println("aread: read accelerometer once");
-    Serial.println("arun: run continous accelerometer reading");
+    println("Available commands:");
+    println("? help: show this message");
+    println("ainit: initialize accelerometer");
+    println("aread: read accelerometer once");
+    println("arun: run continous accelerometer reading");
   }else if(!strcmp(command, "ainit")){
-    Serial.print("Initating accelerometer at 0x");Serial.println(MPU_addr, HEX);
-    Wire.beginTransmission(MPU_addr); Wire.write(MPU_reg_whoami); Wire.endTransmission(false); Wire.requestFrom(MPU_addr, 1, true);
+    print("Initating accelerometer at 0x");Serial.println(MPU_addr, HEX);
+    MPU_read_request(MPU_reg_whoami, 1);
     byte resp = Wire.read();
-    Serial.print("ID=");Serial.println(resp, HEX);
+    print("ID=");Serial.println(resp, HEX);
     if(resp == MPU_addr){
-      Wire.beginTransmission(MPU_addr); Wire.write(MPU_reg_pwr_mgmt_1); Wire.write(0); Wire.endTransmission(true);
+      MPU_write(MPU_reg_pwr_mgmt_1, 0);
       // SIGNAL_PATH_RESET = reserved[5], gyro_reset, accel_reset, temp_reset
-      Wire.beginTransmission(MPU_addr); Wire.write(MPU_reg_signal_path_reset); Wire.write(2 /*accel reset*/); Wire.endTransmission(true);
+      MPU_write(MPU_reg_signal_path_reset, 2 /*accel reset*/);
       //CONFIG = reserved[2], ext_sync_set[3], dlpf_cfg[3]
       // dlpf_cfg = 0:off, 1...6: low pass filter strength, 7: reserved
       //  6: 19ms, 5: 13.8ms, ... , 1: 2 ms
-      Wire.beginTransmission(MPU_addr); Wire.write(MPU_reg_config); Wire.write(6/* 19ms per sample */); Wire.endTransmission(true);
+      MPU_write(MPU_reg_config, 6/* 19ms per sample */);
       //SMPRT_DIV = SMPRT_DIV[8]
       //Rate = GyroRate(1kHz)/(1+SMPRT_DIV)
-      Wire.beginTransmission(MPU_addr); Wire.write(MPU_reg_smprt_div); Wire.write(51 /* 1000ms/19ms - 1 */); Wire.endTransmission(true);
-      Serial.println("OK");
+      MPU_write(MPU_reg_smprt_div,51 /* 1000ms/19ms - 1 */);
+      println("OK");
     }else{
-      Serial.println("ERROR");
+      println("ERROR");
     }
   }else if (!strcmp(command, "aread")){
-    Wire.beginTransmission(MPU_addr); Wire.write(MPU_reg_accel_out); Wire.endTransmission(false); Wire.requestFrom(MPU_addr, 2*3, true);
-    Serial.print("0x");
+    MPU_read_request(MPU_reg_accel_out, 2*3);
+    print("0x");
     for(int i=0; i < 2*3; i++){byte resp = Wire.read(); Serial.write(HEX_DIGITS[resp >> 4]); Serial.write(HEX_DIGITS[resp & 0xf]);}
-    Serial.println("");
+    println("");
   }else if(!strcmp(command, "arun")){
-      //FIFO_EN = temp_fifo_en, xg_fifo_en, yg_fifo_en, zg_fifo_en, accel_fifo_en, slv2_fifo_en, slv1_fifo_en, slv0_fifo_en
-      //Wire.beginTransmission(MPU_addr); Wire.write(MPU_reg_fifo_en); Wire.write(0x08 /* accel_fifo_en */); Wire.endTransmission(true);
-      //Wire.beginTransmission(MPU_addr); Wire.write(MPU_reg_user_ctrl); Wire.write(44 /*FIFO enable & reset*/); Wire.endTransmission(true);
-      Serial.println("Press <Enter> to stop");
-      g_bg_task = task_arun;
+    println("Press <Enter> to stop");
+    g_bg_task = task_arun;
   }else{
-    Serial.print("Unknown command: "); Serial.println(command);
+    print("Unknown command: "); println(command);
   }
-  Serial.print("?>");
+  print("?>");
 }
 
 void console_handle(){
@@ -156,10 +141,10 @@ void console_handle(){
       if(g_console_char_count){
         g_console_char_count -= 2;
       }
-      Serial.print(new_in);    
+      Serial.write(new_in);    
     }else if(g_console_char_count <= CONSOLE_BUF_SIZE) {
       g_console_chars[g_console_char_count] = new_in;
-      Serial.print(new_in);
+      Serial.write(new_in);
     }else{
       g_console_char_count--;
     }
@@ -170,7 +155,7 @@ void console_handle(){
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
-  Serial.print("\r\nArduino accelerometer sketch. Type <help> to get help");
+  print("\r\nArduino accelerometer sketch. Type <help> to get help");
   Wire.begin();
   execute_command("");
 }
