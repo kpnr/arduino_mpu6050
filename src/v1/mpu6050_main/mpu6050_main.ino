@@ -3,6 +3,7 @@
 #define CONSOLE_BUF_SIZE (80)
 #define SAMPLE_SIZE (2 /* 16 bit */ * 3 /* X Y Z */)
 #define SAMPLE_BUF (2)
+#define ACCEL_TO_TEMP_RATIO (10)
 #define MPU_addr (0x68)
 #define MPU_reg_accel_config (0x1c)
 #define MPU_reg_accel_out (0x3b)
@@ -14,6 +15,7 @@
 #define MPU_reg_pwr_mgmt_1 (0x6b)
 #define MPU_reg_signal_path_reset (0x68)
 #define MPU_reg_smprt_div (0x19)
+#define MPU_reg_temp_out_h (0x41)
 #define MPU_reg_user_ctrl (0x6a)
 #define MPU_reg_whoami (0x75)
 
@@ -36,13 +38,22 @@ void MPU_write(int reg, int value){
   Wire.beginTransmission(MPU_addr); Wire.write(reg); Wire.write(value); Wire.endTransmission(true); 
 }
 
+void MPU_temp_read_and_print(){
+  MPU_read_request(MPU_reg_temp_out_h, 2);
+  print("1x");
+  for(int i=0; i < 2; i++){byte resp = Wire.read(); Serial.write(HEX_DIGITS[resp >> 4]); Serial.write(HEX_DIGITS[resp & 0xf]);}
+  println("");  
+}
+
 void task_arun(int keep_running){
   static uint8_t sample_buf[SAMPLE_SIZE*SAMPLE_BUF];
   static byte sample_cnt = 0;
+  static byte accel_cnt = 0;
   static byte t = 0;
   if(!keep_running){
       println("arun done");
       sample_cnt = 0;
+      accel_cnt = 0;
       return;
   }
   MPU_read_request(MPU_reg_int_status, 1);
@@ -72,8 +83,13 @@ void task_arun(int keep_running){
     }
     println("");    
     sample_cnt = 0;
+    if(ACCEL_TO_TEMP_RATIO <= ++accel_cnt){
+      accel_cnt = 0;
+      MPU_temp_read_and_print();
+    }
   }
 }
+
 void execute_command(const char *command){
   Serial.println("");
   if(!strcmp(command, "")){
@@ -84,6 +100,9 @@ void execute_command(const char *command){
     println("ainit: initialize accelerometer");
     println("aread: read accelerometer once");
     println("arun: run continous accelerometer reading");
+    println("temp: read termometer once");
+  }else if(!strcmp(command, "temp")){
+    MPU_temp_read_and_print();
   }else if(!strcmp(command, "ainit")){
     print("Initating accelerometer at 0x");Serial.println(MPU_addr, HEX);
     MPU_read_request(MPU_reg_whoami, 1);
